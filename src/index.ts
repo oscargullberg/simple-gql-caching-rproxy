@@ -37,6 +37,7 @@ const getResponse = async (request: FastifyRequest) => {
   const requestHeaders = { ...request.headers };
   delete requestHeaders["connection"];
   delete requestHeaders["host"];
+  delete requestHeaders["accept-encoding"]; // :)
 
   const { statusCode, headers, body } = await undiciRequest(FORWARD_URL!, {
     body: request.body as string,
