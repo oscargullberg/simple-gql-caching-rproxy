@@ -1,4 +1,4 @@
-FROM node:17.8.0-alpine as build
+FROM node:17.8.0-alpine3.15 as build
 WORKDIR /usr/app
 COPY package*.json ./
 COPY tsconfig.json ./
@@ -9,7 +9,7 @@ RUN npm run build
 FROM node:17.8.0 as install
 WORKDIR /usr/app
 COPY --from=build /usr/app/package*.json ./
-COPY --from=build /usr/app/dist ./distE
+COPY --from=build /usr/app/dist ./dist
 RUN npm install @node-rs/xxhash-linux-x64-musl --save-prod  
 RUN npm install --production-only
 
