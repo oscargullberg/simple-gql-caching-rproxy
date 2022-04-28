@@ -1,7 +1,7 @@
 import fastify from "fastify";
 import xxhash from "@node-rs/xxhash";
 import NodeCache from "node-cache";
-import { request as undiciRequest } from "undici";
+import { Pool } from "undici";
 import {
   FORWARD_URL,
   PORT,
@@ -20,8 +20,14 @@ if (!ADMIN_SECRET) {
   throw new Error("SGCRP_ADMIN_SECRET is required.");
 }
 
+const { origin: forwardUrlOrigin, pathname: forwardUrlPath } = new URL(
+  FORWARD_URL
+);
 const varyHeaders = VARY_HEADERS.split(",").map((header) => header.trim());
 const cache = new NodeCache({ stdTTL: CACHE_TTL_SECONDS, checkperiod: 120 });
+const undiciPool = new Pool(forwardUrlOrigin, {
+  connections: 50,
+});
 const server = fastify();
 
 const getCacheKey = (headers: IncomingHttpHeaders, body: string) => {
@@ -39,10 +45,11 @@ const getResponse = async (request: FastifyRequest) => {
   delete requestHeaders["host"];
   delete requestHeaders["accept-encoding"]; // :)
 
-  const { statusCode, headers, body } = await undiciRequest(FORWARD_URL!, {
+  const { statusCode, headers, body } = await undiciPool.request({
     body: request.body as string,
     method: request.method as HttpMethod,
     headers: requestHeaders,
+    path: forwardUrlPath,
   });
   const bodyText = await body.text();
   return { statusCode, headers, bodyText };
