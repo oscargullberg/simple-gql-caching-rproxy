@@ -35,7 +35,7 @@ const getCacheKey = (headers: IncomingHttpHeaders, body: string) => {
     (acc, header) => `${acc}${header}:${headers[header]}`,
     ""
   );
-  const hashedBody = xxhash.xxh64(body);
+  const hashedBody = xxhash.xxh3.Xxh3.withSeed(BigInt(0)).update(body).digest();
   return `${headersPart}-${hashedBody}`;
 };
 
