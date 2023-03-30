@@ -9,7 +9,7 @@ import {
   CACHE_TTL_SECONDS,
   ADMIN_SECRET,
 } from "./config";
-import type { HttpMethod } from "undici/types/dispatcher";
+import type dispatcher from "undici/types/dispatcher";
 import type { IncomingHttpHeaders } from "http";
 import type { FastifyRequest } from "fastify";
 
@@ -47,7 +47,7 @@ const getResponse = async (request: FastifyRequest) => {
 
   const { statusCode, headers, body } = await undiciPool.request({
     body: request.body as string,
-    method: request.method as HttpMethod,
+    method: request.method as dispatcher.HttpMethod,
     headers: requestHeaders,
     path: forwardUrlPath,
   });
