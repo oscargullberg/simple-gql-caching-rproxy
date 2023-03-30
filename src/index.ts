@@ -65,7 +65,11 @@ const getResponseWithCache = async (request: FastifyRequest) => {
     };
   }
   const response = await getResponse(request);
-  cache.set(key, response);
+  if (response.statusCode !== 200) {
+    console.error(`Received invalid response with status ${response.statusCode}.'`);
+  } else {
+    cache.set(key, response);
+  }
   return response;
 };
 
