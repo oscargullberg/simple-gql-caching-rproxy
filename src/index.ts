@@ -12,6 +12,7 @@ import {
 import type dispatcher from "undici/types/dispatcher";
 import type { IncomingHttpHeaders } from "http";
 import type { FastifyRequest } from "fastify";
+import { timingSafeEqual } from "crypto";
 
 if (!FORWARD_URL) {
   throw new Error("SGCRP_FORWARD_URL is required.");
@@ -74,9 +75,23 @@ const fetchResponseWithCache = async (request: FastifyRequest) => {
   return response;
 };
 
-const isAuthorizedAdmin = (request: FastifyRequest) =>
-  request.headers["sgcrp-admin-secret"] === ADMIN_SECRET ||
-  (request.query as any)["sgcrp-admin-secret"] === ADMIN_SECRET;
+const isAuthorizedAdmin = (request: FastifyRequest): boolean => {
+  const clientSecret =
+    request.headers["sgcrp-admin-secret"] ||
+    ((request.query as any)["sgcrp-admin-secret"] as any);
+
+  if (
+    typeof clientSecret !== "string" ||
+    clientSecret.length !== ADMIN_SECRET!.length
+  ) {
+    return false;
+  }
+
+  const clientSecretBuffer = Buffer.from(clientSecret, "utf8");
+  const serverSecretBuffer = Buffer.from(ADMIN_SECRET!, "utf-8");
+
+  return timingSafeEqual(clientSecretBuffer, serverSecretBuffer);
+};
 
 server.removeAllContentTypeParsers();
 server.addContentTypeParser(
