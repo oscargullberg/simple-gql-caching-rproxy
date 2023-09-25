@@ -39,11 +39,10 @@ const getCacheKey = (headers: IncomingHttpHeaders, body: string) => {
   return `${headersPart}-${hashedBody}`;
 };
 
-const getResponse = async (request: FastifyRequest) => {
-  const requestHeaders = { ...request.headers };
+const fetchRemoteResponse = async (request: FastifyRequest) => {
+  const requestHeaders = { ...request.headers, "accept-encoding": "identity" };
   delete requestHeaders["connection"];
   delete requestHeaders["host"];
-  delete requestHeaders["accept-encoding"]; // :)
 
   const { statusCode, headers, body } = await undiciPool.request({
     body: request.body as string,
@@ -55,7 +54,7 @@ const getResponse = async (request: FastifyRequest) => {
   return { statusCode, headers, bodyText };
 };
 
-const getResponseWithCache = async (request: FastifyRequest) => {
+const fetchResponseWithCache = async (request: FastifyRequest) => {
   const key = getCacheKey(request.headers, request.body as string);
   if (cache.has(key)) {
     return cache.get(key) as {
@@ -64,21 +63,20 @@ const getResponseWithCache = async (request: FastifyRequest) => {
       headers: IncomingHttpHeaders;
     };
   }
-  const response = await getResponse(request);
+  const response = await fetchRemoteResponse(request);
   if (response.statusCode !== 200) {
-    console.error(`Received invalid response with status ${response.statusCode}.'`);
+    console.error(
+      `Received invalid response with status ${response.statusCode}.'`
+    );
   } else {
     cache.set(key, response);
   }
   return response;
 };
 
-const authorizeAdmin = (request: FastifyRequest) => {
-  return (
-    request.headers["sgcrp-admin-secret"] === ADMIN_SECRET ||
-    (request.query as any)["sgcrp-admin-secret"] === ADMIN_SECRET
-  );
-};
+const isAuthorizedAdmin = (request: FastifyRequest) =>
+  request.headers["sgcrp-admin-secret"] === ADMIN_SECRET ||
+  (request.query as any)["sgcrp-admin-secret"] === ADMIN_SECRET;
 
 server.removeAllContentTypeParsers();
 server.addContentTypeParser(
@@ -90,14 +88,16 @@ server.addContentTypeParser(
 );
 
 server.post("/proxy", async (request, reply) => {
-  const { statusCode, headers, bodyText } = await getResponseWithCache(request);
+  const { statusCode, headers, bodyText } = await fetchResponseWithCache(
+    request
+  );
   reply.raw.writeHead(statusCode, headers);
   reply.raw.write(bodyText);
   reply.raw.end();
 });
 
 server.delete("/caches", async (request, reply) => {
-  if (!authorizeAdmin(request)) {
+  if (!isAuthorizedAdmin(request)) {
     reply.status(401).send();
     return;
   }
@@ -107,7 +107,7 @@ server.delete("/caches", async (request, reply) => {
 });
 
 server.post("/hooks/purge", async (request, reply) => {
-  if (!authorizeAdmin(request)) {
+  if (!isAuthorizedAdmin(request)) {
     reply.status(401).send();
     return;
   }
@@ -116,7 +116,7 @@ server.post("/hooks/purge", async (request, reply) => {
   reply.status(200).send();
 });
 
-server.listen(PORT, "0.0.0.0", (err, address) => {
+server.listen({ port: PORT as number, host: "0.0.0.0" }, (err, address) => {
   if (err) {
     console.error(err);
     process.exit(1);
