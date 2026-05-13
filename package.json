@@ -2,26 +2,25 @@
   "name": "simple-gql-caching-rproxy",
   "version": "1.0.0",
   "description": "",
-  "main": "src/index.ts",
+  "main": "dist/index.js",
   "scripts": {
-    "dev": "ts-node-dev --env-file=.env --log-error --files ./src/index.ts",
+    "dev": "tsx --env-file=.env watch ./src/index.ts",
     "build": "tsc -p tsconfig.json",
+    "test": "tsx --test \"test/**/*.test.ts\"",
     "start": "node dist/index.js"
   },
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@node-rs/xxhash": "^1.4.2",
-    "fastify": "^4.23.2",
-    "node-cache": "^5.1.2",
-    "undici": "^5.25.2"
+    "@node-rs/xxhash": "^1.7.6",
+    "fastify": "^5.8.5"
   },
   "devDependencies": {
-    "@types/node": "^20.6.5",
-    "ts-node-dev": "^2.0.0",
-    "typescript": "^5.2.2"
+    "@types/node": "^24.12.4",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3"
   },
   "engines": {
-    "node": ">=20.6.0"
+    "node": ">=24"
   }
 }

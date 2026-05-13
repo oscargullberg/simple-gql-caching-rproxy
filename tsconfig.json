@@ -1,13 +1,13 @@
 {
   "compilerOptions": {
     "esModuleInterop": true,
-    "module": "commonjs",
+    "module": "Node16",
     "target": "esnext",
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
     "preserveConstEnums": true,
     "removeComments": true,
-    "moduleResolution": "node",
+    "moduleResolution": "node16",
     "rootDir": "src",
     "outDir": "dist",
     "sourceMap": true,
