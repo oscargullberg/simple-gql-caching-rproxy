@@ -1,7 +1,9 @@
 import fastify from "fastify";
 import { timingSafeEqual } from "node:crypto";
+import { Readable, Transform } from "node:stream";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { IncomingHttpHeaders, OutgoingHttpHeaders } from "node:http";
+import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import { buildCacheKey, TtlCache } from "./cache";
 import { loadConfig } from "./config";
 import type { AppConfig } from "./config";
@@ -33,7 +35,13 @@ const HOP_BY_HOP_RESPONSE_HEADERS = new Set([
 ]);
 
 export type RemoteResponse = {
-  bodyText: string;
+  body: Readable;
+  headers: OutgoingHttpHeaders;
+  statusCode: number;
+};
+
+type CachedResponse = {
+  body: Buffer;
   headers: OutgoingHttpHeaders;
   statusCode: number;
 };
@@ -106,10 +114,36 @@ const fetchRemoteResponse: FetchRemoteResponse = async ({
   });
 
   return {
-    bodyText: await response.text(),
+    body: response.body
+      ? Readable.fromWeb(response.body as unknown as NodeReadableStream)
+      : Readable.from([]),
     headers: buildReplyHeaders(response.headers),
     statusCode: response.status,
   };
+};
+
+const cacheStream = (
+  stream: Readable,
+  onComplete: (body: Buffer) => void,
+): Readable => {
+  const chunks: Buffer[] = [];
+  let length = 0;
+
+  const collector = new Transform({
+    transform(chunk: Buffer | string, _, callback) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      chunks.push(buffer);
+      length += buffer.length;
+      callback(null, chunk);
+    },
+    flush(callback) {
+      onComplete(Buffer.concat(chunks, length));
+      callback();
+    },
+  });
+
+  stream.on("error", (error) => collector.destroy(error));
+  return stream.pipe(collector);
 };
 
 const isAuthorizedAdmin = (
@@ -137,7 +171,7 @@ export const createServer = (
   config: AppConfig,
   remoteFetch: FetchRemoteResponse = fetchRemoteResponse,
 ) => {
-  const cache = new TtlCache<RemoteResponse>({
+  const cache = new TtlCache<CachedResponse>({
     maxEntries: config.cacheMaxEntries,
     ttlMs: config.cacheTtlSeconds * 1_000,
   });
@@ -161,7 +195,7 @@ export const createServer = (
       return reply
         .code(cachedResponse.statusCode)
         .headers(cachedResponse.headers)
-        .send(cachedResponse.bodyText);
+        .send(cachedResponse.body);
     }
 
     const response = await remoteFetch({
@@ -172,19 +206,28 @@ export const createServer = (
       url: config.forwardUrl,
     });
 
-    if (response.statusCode === 200) {
-      cache.set(key, response);
-    } else {
+    if (response.statusCode !== 200) {
       request.log.warn(
         { statusCode: response.statusCode },
         "Remote GraphQL response was not cached",
       );
     }
 
+    const responseBody =
+      response.statusCode === 200
+        ? cacheStream(response.body, (body) => {
+            cache.set(key, {
+              body,
+              headers: response.headers,
+              statusCode: response.statusCode,
+            });
+          })
+        : response.body;
+
     return reply
       .code(response.statusCode)
       .headers(response.headers)
-      .send(response.bodyText);
+      .send(responseBody);
   });
 
   const purgeCaches = async (request: FastifyRequest, reply: FastifyReply) => {

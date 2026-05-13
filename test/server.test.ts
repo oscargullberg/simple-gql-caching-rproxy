@@ -1,4 +1,6 @@
-import { deepStrictEqual, strictEqual } from "node:assert";
+import { deepStrictEqual, ok, strictEqual } from "node:assert";
+import { request as httpRequest } from "node:http";
+import { Readable, PassThrough } from "node:stream";
 import { test } from "node:test";
 import { createServer } from "../src/index";
 import type { RemoteResponse } from "../src/index";
@@ -18,7 +20,7 @@ test("POST /proxy caches repeated successful GraphQL responses", async () => {
     async ({ url, body }): Promise<RemoteResponse> => {
       calls.push({ url, body });
       return {
-        bodyText: '{"data":{"ok":true}}',
+        body: Readable.from(['{"data":{"ok":true}}']),
         headers: { "content-type": "application/json" },
         statusCode: 200,
       };
@@ -62,7 +64,7 @@ test("admin purge accepts secrets in the query string", async () => {
       varyHeaders: [],
     },
     async (): Promise<RemoteResponse> => ({
-      bodyText: '{"data":{"ok":true}}',
+      body: Readable.from(['{"data":{"ok":true}}']),
       headers: { "content-type": "application/json" },
       statusCode: 200,
     })
@@ -93,7 +95,7 @@ test("POST /proxy varies cache entries by configured request headers", async () 
     async (): Promise<RemoteResponse> => {
       calls += 1;
       return {
-        bodyText: `{"data":{"call":${calls}}}`,
+        body: Readable.from([`{"data":{"call":${calls}}}`]),
         headers: { "content-type": "application/json" },
         statusCode: 200,
       };
@@ -136,7 +138,7 @@ test("admin purge requires the configured secret and clears the cache", async ()
     async (): Promise<RemoteResponse> => {
       calls += 1;
       return {
-        bodyText: `{"data":{"call":${calls}}}`,
+        body: Readable.from([`{"data":{"call":${calls}}}`]),
         headers: { "content-type": "application/json" },
         statusCode: 200,
       };
@@ -160,6 +162,71 @@ test("admin purge requires the configured secret and clears the cache", async ()
   strictEqual(unauthorized.statusCode, 401);
   strictEqual(authorized.statusCode, 200);
   deepStrictEqual(JSON.parse(afterPurge.body), { data: { call: 2 } });
+
+  await server.close();
+});
+
+test("POST /proxy streams cache misses before the upstream body finishes", async () => {
+  const server = createServer(
+    {
+      adminSecret: "secret",
+      cacheMaxEntries: 100,
+      cacheTtlSeconds: 60,
+      forwardUrl: new URL("https://example.com/graphql"),
+      port: 0,
+      requestTimeoutMs: 5_000,
+      varyHeaders: [],
+    },
+    async (): Promise<RemoteResponse> => {
+      const body = new PassThrough();
+      setTimeout(() => body.write('{"data":'), 10);
+      setTimeout(() => body.end('{"ok":true}}'), 150);
+
+      return {
+        body,
+        headers: { "content-type": "application/json" },
+        statusCode: 200,
+      };
+    }
+  );
+
+  await server.listen({ port: 0 });
+  const address = server.server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Expected server to listen on a TCP port.");
+  }
+
+  const startedAt = Date.now();
+  let firstChunkAt: number | undefined;
+  const responseBody = await new Promise<string>((resolve, reject) => {
+    const request = httpRequest(
+      {
+        headers: { "content-type": "application/json" },
+        hostname: "127.0.0.1",
+        method: "POST",
+        path: "/proxy",
+        port: address.port,
+      },
+      (response) => {
+        let body = "";
+        response.on("data", (chunk: Buffer) => {
+          firstChunkAt ??= Date.now();
+          body += chunk.toString("utf8");
+        });
+        response.on("end", () => resolve(body));
+      }
+    );
+
+    request.on("error", reject);
+    request.end('{"query":"{ viewer { id } }"}');
+  });
+
+  strictEqual(responseBody, '{"data":{"ok":true}}');
+  ok(firstChunkAt !== undefined);
+  ok(
+    firstChunkAt - startedAt < 100,
+    `first chunk arrived after ${firstChunkAt - startedAt}ms`
+  );
 
   await server.close();
 });
