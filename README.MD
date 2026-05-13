@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project provides a simple caching reverse proxy for GraphQL APIs. It is built using Fastify, NodeCache, and Undici.
+This project provides a simple in-memory caching reverse proxy for GraphQL APIs. It is built with Fastify, native Node.js `fetch`, and a bounded TTL cache keyed with xxh3-128.
 
 ## Requirements
 
@@ -24,7 +24,7 @@ Create a `.env` file in the root directory and set the following variables:
 - `SGCRP_CACHE_TTL_SECONDS`: Time-to-live for cache in seconds. Default is 120.
 - `SGCRP_CACHE_MAX_ENTRIES`: Maximum number of cached responses kept in memory. Default is 5000.
 - `SGCRP_REQUEST_TIMEOUT_MS`: Timeout for upstream GraphQL requests in milliseconds. Default is 30000.
-- `SGCRP_VARY_HEADERS`: Comma-separated list of headers that should be varied in the cache.
+- `SGCRP_VARY_HEADERS`: Comma-separated list of request headers that should be included in the cache key.
 
 ## Development
 
@@ -52,8 +52,8 @@ npm start
 
 ## API Endpoints
 
-- `POST /proxy`: Forwards and caches GraphQL requests.
-- `DELETE /caches` and `POST /hooks/purge` : Purges the cache (Admin only).
+- `POST /proxy`: Forwards and caches successful GraphQL responses.
+- `DELETE /caches` and `POST /hooks/purge`: Purges the cache. Pass the admin secret using the `sgcrp-admin-secret` header or `sgcrp-admin-secret` query parameter.
 
 ## Contributing
 
