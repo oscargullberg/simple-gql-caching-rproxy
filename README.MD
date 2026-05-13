@@ -6,7 +6,7 @@ This project provides a simple caching reverse proxy for GraphQL APIs. It is bui
 
 ## Requirements
 
-- Node.js >= 20.6.0
+- Node.js >=24
 
 ## Installation
 
@@ -22,6 +22,8 @@ Create a `.env` file in the root directory and set the following variables:
 - `SGCRP_ADMIN_SECRET`: Admin secret key for privileged operations like cache purging (Required).
 - `SGCRP_PORT`: Port on which the proxy server will run. Default is 8080.
 - `SGCRP_CACHE_TTL_SECONDS`: Time-to-live for cache in seconds. Default is 120.
+- `SGCRP_CACHE_MAX_ENTRIES`: Maximum number of cached responses kept in memory. Default is 5000.
+- `SGCRP_REQUEST_TIMEOUT_MS`: Timeout for upstream GraphQL requests in milliseconds. Default is 30000.
 - `SGCRP_VARY_HEADERS`: Comma-separated list of headers that should be varied in the cache.
 
 ## Development
