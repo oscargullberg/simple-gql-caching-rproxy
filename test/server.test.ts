@@ -5,6 +5,32 @@ import { test } from "node:test";
 import { createServer } from "../src/index";
 import type { RemoteResponse } from "../src/index";
 
+test("GET /healthz returns ok", async () => {
+  const server = createServer(
+    {
+      adminSecret: "secret",
+      cacheMaxEntries: 100,
+      cacheTtlSeconds: 60,
+      forwardUrl: new URL("https://example.com/graphql"),
+      port: 0,
+      requestTimeoutMs: 5_000,
+      varyHeaders: [],
+    },
+    async (): Promise<RemoteResponse> => ({
+      body: Readable.from(['{"data":{"ok":true}}']),
+      headers: { "content-type": "application/json" },
+      statusCode: 200,
+    })
+  );
+
+  const response = await server.inject({ method: "GET", url: "/healthz" });
+
+  strictEqual(response.statusCode, 200);
+  strictEqual(response.body, "ok");
+
+  await server.close();
+});
+
 test("POST /proxy caches repeated successful GraphQL responses", async () => {
   const calls: Array<{ url: URL; body: string }> = [];
   const server = createServer(

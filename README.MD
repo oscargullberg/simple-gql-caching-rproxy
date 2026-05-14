@@ -55,6 +55,7 @@ npm start
 
 ## API Endpoints
 
+- `GET /healthz`: Returns `ok`.
 - `POST /proxy`: Forwards and caches successful GraphQL responses.
 - `DELETE /caches`: Purges the cache.
 - `POST /hooks/purge`: Purges the cache.

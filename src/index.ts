@@ -186,6 +186,10 @@ export const createServer = (
     },
   );
 
+  server.get("/healthz", async (_, reply) => {
+    return reply.type("text/plain").send("ok");
+  });
+
   server.post("/proxy", async (request, reply) => {
     const body = (request.body as string | undefined) ?? "";
     const key = buildCacheKey(request.headers, body, config.varyHeaders);
