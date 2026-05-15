@@ -78,6 +78,112 @@ test("POST /proxy caches repeated successful GraphQL responses", async () => {
   await server.close();
 });
 
+test("POST /proxy coalesces concurrent misses for the same cache key", async () => {
+  let calls = 0;
+  let resolveUpstream: (() => void) | undefined;
+  const upstreamReady = new Promise<void>((resolve) => {
+    resolveUpstream = resolve;
+  });
+  const server = createServer(
+    {
+      adminSecret: "secret",
+      cacheMaxEntries: 100,
+      cacheTtlSeconds: 60,
+      forwardUrl: new URL("https://example.com/graphql"),
+      port: 0,
+      requestTimeoutMs: 5_000,
+      varyHeaders: [],
+    },
+    async (): Promise<RemoteResponse> => {
+      calls += 1;
+      await upstreamReady;
+
+      return {
+        body: Readable.from(['{"data":{"ok":true}}']),
+        headers: { "content-type": "application/json" },
+        statusCode: 200,
+      };
+    }
+  );
+
+  const body = '{"query":"{ countries { code } }"}';
+  const requests = Array.from({ length: 20 }, () =>
+    server.inject({
+      method: "POST",
+      url: "/proxy",
+      headers: { "content-type": "application/json" },
+      payload: body,
+    })
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  strictEqual(calls, 1);
+  resolveUpstream?.();
+
+  const responses = await Promise.all(requests);
+
+  strictEqual(calls, 1);
+  for (const response of responses) {
+    strictEqual(response.statusCode, 200);
+    strictEqual(response.body, '{"data":{"ok":true}}');
+  }
+
+  await server.close();
+});
+
+test("POST /proxy sends the same non-cacheable upstream response to concurrent waiters", async () => {
+  let calls = 0;
+  let resolveUpstream: (() => void) | undefined;
+  const upstreamReady = new Promise<void>((resolve) => {
+    resolveUpstream = resolve;
+  });
+  const server = createServer(
+    {
+      adminSecret: "secret",
+      cacheMaxEntries: 100,
+      cacheTtlSeconds: 60,
+      forwardUrl: new URL("https://example.com/graphql"),
+      port: 0,
+      requestTimeoutMs: 5_000,
+      varyHeaders: [],
+    },
+    async (): Promise<RemoteResponse> => {
+      calls += 1;
+      await upstreamReady;
+
+      return {
+        body: Readable.from(['{"errors":[{"message":"upstream busy"}]}']),
+        headers: { "content-type": "application/json" },
+        statusCode: 503,
+      };
+    }
+  );
+
+  const body = '{"query":"{ countries { code } }"}';
+  const requests = Array.from({ length: 10 }, () =>
+    server.inject({
+      method: "POST",
+      url: "/proxy",
+      headers: { "content-type": "application/json" },
+      payload: body,
+    })
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  strictEqual(calls, 1);
+  resolveUpstream?.();
+
+  const responses = await Promise.all(requests);
+
+  strictEqual(calls, 1);
+  for (const response of responses) {
+    strictEqual(response.statusCode, 503);
+    strictEqual(response.body, '{"errors":[{"message":"upstream busy"}]}');
+  }
+
+  await server.close();
+});
+
 test("admin purge accepts secrets in the query string", async () => {
   const server = createServer(
     {
@@ -188,6 +294,68 @@ test("admin purge requires the configured secret and clears the cache", async ()
   strictEqual(unauthorized.statusCode, 401);
   strictEqual(authorized.statusCode, 200);
   deepStrictEqual(JSON.parse(afterPurge.body), { data: { call: 2 } });
+
+  await server.close();
+});
+
+test("admin purge prevents in-flight responses from repopulating the cache", async () => {
+  let calls = 0;
+  let finishFirstResponse: (() => void) | undefined;
+  const server = createServer(
+    {
+      adminSecret: "secret",
+      cacheMaxEntries: 100,
+      cacheTtlSeconds: 60,
+      forwardUrl: new URL("https://example.com/graphql"),
+      port: 0,
+      requestTimeoutMs: 5_000,
+      varyHeaders: [],
+    },
+    async (): Promise<RemoteResponse> => {
+      calls += 1;
+
+      if (calls === 1) {
+        const body = new PassThrough();
+        body.write('{"data":');
+        finishFirstResponse = () => body.end('{"call":1}}');
+
+        return {
+          body,
+          headers: { "content-type": "application/json" },
+          statusCode: 200,
+        };
+      }
+
+      return {
+        body: Readable.from([`{"data":{"call":${calls}}}`]),
+        headers: { "content-type": "application/json" },
+        statusCode: 200,
+      };
+    }
+  );
+
+  const body = '{"query":"{ viewer { id } }"}';
+  const first = server.inject({ method: "POST", url: "/proxy", payload: body });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  const purge = await server.inject({
+    method: "DELETE",
+    url: "/caches",
+    headers: { "sgcrp-admin-secret": "secret" },
+  });
+
+  strictEqual(purge.statusCode, 200);
+  finishFirstResponse?.();
+  strictEqual((await first).body, '{"data":{"call":1}}');
+
+  const afterPurge = await server.inject({
+    method: "POST",
+    url: "/proxy",
+    payload: body,
+  });
+
+  strictEqual(calls, 2);
+  strictEqual(afterPurge.body, '{"data":{"call":2}}');
 
   await server.close();
 });

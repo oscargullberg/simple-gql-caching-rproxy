@@ -40,7 +40,7 @@ export type RemoteResponse = {
   statusCode: number;
 };
 
-type CachedResponse = {
+type BufferedResponse = {
   body: Buffer;
   headers: OutgoingHttpHeaders;
   statusCode: number;
@@ -125,9 +125,20 @@ const fetchRemoteResponse: FetchRemoteResponse = async ({
 const cacheStream = (
   stream: Readable,
   onComplete: (body: Buffer) => void,
+  onError: (error: Error) => void,
 ): Readable => {
   const chunks: Buffer[] = [];
   let length = 0;
+  let didError = false;
+
+  const fail = (error: Error) => {
+    if (didError) {
+      return;
+    }
+
+    didError = true;
+    onError(error);
+  };
 
   const collector = new Transform({
     transform(chunk: Buffer | string, _, callback) {
@@ -142,7 +153,11 @@ const cacheStream = (
     },
   });
 
-  stream.on("error", (error) => collector.destroy(error));
+  stream.on("error", (error) => {
+    fail(error);
+    collector.destroy(error);
+  });
+  collector.on("error", fail);
   return stream.pipe(collector);
 };
 
@@ -171,10 +186,12 @@ export const createServer = (
   config: AppConfig,
   remoteFetch: FetchRemoteResponse = fetchRemoteResponse,
 ) => {
-  const cache = new TtlCache<CachedResponse>({
+  const cache = new TtlCache<BufferedResponse>({
     maxEntries: config.cacheMaxEntries,
     ttlMs: config.cacheTtlSeconds * 1_000,
   });
+  const inFlight = new Map<string, Promise<BufferedResponse>>();
+  let cacheGeneration = 0;
   const server = fastify();
 
   server.removeAllContentTypeParsers();
@@ -202,12 +219,40 @@ export const createServer = (
         .send(cachedResponse.body);
     }
 
+    const pendingResponse = inFlight.get(key);
+    if (pendingResponse) {
+      const response = await pendingResponse;
+      return reply
+        .code(response.statusCode)
+        .headers(response.headers)
+        .send(response.body);
+    }
+
+    let resolveInFlight!: (response: BufferedResponse) => void;
+    let rejectInFlight!: (error: unknown) => void;
+    const inFlightResponse = new Promise<BufferedResponse>((resolve, reject) => {
+      resolveInFlight = resolve;
+      rejectInFlight = reject;
+    });
+    inFlightResponse.catch(() => undefined);
+    inFlight.set(key, inFlightResponse);
+    const requestGeneration = cacheGeneration;
+    const clearInFlight = () => {
+      if (inFlight.get(key) === inFlightResponse) {
+        inFlight.delete(key);
+      }
+    };
+
     const response = await remoteFetch({
       body,
       headers: buildForwardHeaders(request.headers),
       method: request.method,
       signal: AbortSignal.timeout(config.requestTimeoutMs),
       url: config.forwardUrl,
+    }).catch((error) => {
+      rejectInFlight(error);
+      clearInFlight();
+      throw error;
     });
 
     if (response.statusCode !== 200) {
@@ -217,16 +262,30 @@ export const createServer = (
       );
     }
 
-    const responseBody =
-      response.statusCode === 200
-        ? cacheStream(response.body, (body) => {
-            cache.set(key, {
-              body,
-              headers: response.headers,
-              statusCode: response.statusCode,
-            });
-          })
-        : response.body;
+    const responseBody = cacheStream(
+      response.body,
+      (body) => {
+        const bufferedResponse = {
+          body,
+          headers: response.headers,
+          statusCode: response.statusCode,
+        };
+
+        if (
+          response.statusCode === 200 &&
+          requestGeneration === cacheGeneration
+        ) {
+          cache.set(key, bufferedResponse);
+        }
+
+        resolveInFlight(bufferedResponse);
+        clearInFlight();
+      },
+      (error) => {
+        rejectInFlight(error);
+        clearInFlight();
+      },
+    );
 
     return reply
       .code(response.statusCode)
@@ -240,6 +299,8 @@ export const createServer = (
     }
 
     cache.clear();
+    inFlight.clear();
+    cacheGeneration += 1;
     return reply.status(200).send();
   };
 
