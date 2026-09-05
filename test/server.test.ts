@@ -184,7 +184,7 @@ test("POST /proxy sends the same non-cacheable upstream response to concurrent w
   await server.close();
 });
 
-test("admin purge accepts secrets in the query string", async () => {
+test("admin purge preserves query-string secret compatibility", async () => {
   const server = createServer(
     {
       adminSecret: "secret",
