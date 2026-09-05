@@ -53,3 +53,35 @@ test("TtlCache treats get as recent usage", () => {
   strictEqual(cache.get("b"), undefined);
   strictEqual(cache.get("c"), "third");
 });
+
+test("TtlCache enforces a total byte budget", () => {
+  const cache = new TtlCache<Buffer>({
+    maxEntries: 10,
+    maxSizeBytes: 5,
+    sizeOf: (value) => value.byteLength,
+    ttlMs: 10_000,
+  });
+
+  cache.set("a", Buffer.from("123"));
+  cache.set("b", Buffer.from("456"));
+
+  strictEqual(cache.get("a"), undefined);
+  strictEqual(cache.get("b")?.toString(), "456");
+  strictEqual(cache.sizeBytes, 3);
+  strictEqual(cache.set("oversized", Buffer.from("123456")), false);
+  strictEqual(cache.sizeBytes, 3);
+});
+
+test("TtlCache accepts a shorter TTL for one entry", () => {
+  let now = 0;
+  const cache = new TtlCache<string>({
+    maxEntries: 10,
+    now: () => now,
+    ttlMs: 10_000,
+  });
+
+  cache.set("short", "value", 500);
+  now = 500;
+
+  strictEqual(cache.get("short"), undefined);
+});

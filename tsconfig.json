@@ -2,16 +2,18 @@
   "compilerOptions": {
     "esModuleInterop": true,
     "module": "Node16",
-    "target": "esnext",
-    "emitDecoratorMetadata": true,
-    "experimentalDecorators": true,
-    "preserveConstEnums": true,
+    "target": "ES2024",
     "removeComments": true,
     "moduleResolution": "node16",
     "rootDir": "src",
     "outDir": "dist",
     "sourceMap": true,
     "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "forceConsistentCasingInFileNames": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noUncheckedIndexedAccess": true
   },
   "include": [
     "./src/**/*"

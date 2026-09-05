@@ -51,12 +51,15 @@ test("buildCacheKey varies by configured header values and request body", () => 
   );
 });
 
-test("buildCacheKey uses one 128-bit xxh3 digest for the canonical cache input", () => {
+test("buildCacheKey uses one SHA-256 digest for the canonical cache input", () => {
   const key = buildCacheKey(
     { authorization: "Bearer first" },
     '{"query":"{ viewer { id } }"}',
     ["authorization"]
   );
 
-  strictEqual(key, "206742026840867269970317089240040549090");
+  strictEqual(
+    key,
+    "c05b748709da815b2a51484935d01666d64ca7277c45a93e136ba8ecd7da57b2",
+  );
 });
